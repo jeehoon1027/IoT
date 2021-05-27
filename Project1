@@ -1,0 +1,195 @@
+#include <ESP8266WebServer.h>
+#include <Wire.h>
+#include <ESP8266HTTPClient.h>
+#include <ESP8266WiFi.h>
+#include <ArduinoJson.h>
+
+#define DELAY_MS 2000
+
+HTTPClient myclient;
+DynamicJsonDocument doc(2048);
+ESP8266WebServer myHTTPServer(80);//포트번호
+
+int motorPower=0;
+int MPU_Address=0x68;
+
+int16_t AcX, AcY, AcZ, Tmp;
+
+char acc_x[10];
+char acc_y[10];
+char acc_z[10];
+
+unsigned long long lastMs=0;
+
+void openweatherAPI(void){
+    
+    myclient.begin("http://api.openweathermap.org/data/2.5/weather?q=suwon&appid=43c4cb1cab9c173f957dd194c7ac5ed6");
+  
+    int getResult = myclient.GET();
+    if(getResult == HTTP_CODE_OK){
+    
+    String recieveData = myclient.getString();
+    //Serial.printf("%s\r\n\r\n END Transmission\r\n",recieveData.c_str());
+    deserializeJson(doc,  recieveData);
+    
+    const char* whe = doc["weather"][0]["main"];
+    String city = doc["name"];
+    float tmp = doc["main"]["temp"];
+
+    //Serial.printf("현재 %s의 날씨는 %s 입니다.\r\n",city.c_str(),whe);
+    //Serial.printf("온도는: %f 입니다.\r\n",(float)(doc["main"]["temp"]));
+    //Serial.printf("습도는: %f 입니다.\r\n",(float)(doc["main"]["humidity"]));
+    
+    //myHTTPServer.hasArg();
+    //myHTTPServer.send();
+    
+    }
+    
+  else{
+    Serial.printf("ERROR, code:%d\r\n",getResult);
+    }
+   
+    Serial.printf("\r\n\r\nHTML END........\r\n\r\n");
+    myclient.end();
+    delay(5000);
+  }
+
+void fnRoot(void)
+{
+  char tmpBuffer[2000];
+  strcpy(tmpBuffer, "<html>\r\n");
+  strcat(tmpBuffer, "IOT Smart Home System Project<br><br>\r\n");
+  
+  strcat(tmpBuffer, "acc_x:\r\n");
+  strcat(tmpBuffer, acc_x);
+  strcat(tmpBuffer, "<br>\r\n");
+  
+  strcat(tmpBuffer, "acc_y:\r\n");
+  strcat(tmpBuffer, acc_y);
+  strcat(tmpBuffer, "<br>\r\n");
+  
+  strcat(tmpBuffer, "acc_z:\r\n");
+  strcat(tmpBuffer, acc_z);
+  strcat(tmpBuffer, "<br><br>\r\n");
+
+  strcat(tmpBuffer, "EARTHQUAKE ALERT? : ");
+  strcat(tmpBuffer, "<br>\r\n");
+  
+  strcat(tmpBuffer, "<form method=\"get\" action=\"input\" >");
+  strcat(tmpBuffer, "Motor <input type=\"text\" name=\"power\" >");
+  strcat(tmpBuffer, "<input type=\"submit\" ></form>\r\n");
+  
+  snprintf(tmpBuffer, sizeof(tmpBuffer), "%s%s", tmpBuffer, "</html>");
+  
+  myHTTPServer.send(200, "text/html", tmpBuffer); 
+}
+
+void motor(void)
+{
+  char motorSpeed[800];
+  if(myHTTPServer.hasArg("power"))
+  {
+    strcpy(motorSpeed, "<meta charset=utf-8>");
+    strcat(motorSpeed, "Moter Speed: ");
+    strcat(motorSpeed, myHTTPServer.arg("power").c_str());
+    motorPower = atoi(myHTTPServer.arg("power").c_str());
+
+    if(motorPower>=1023) motorPower=1023;
+    else if (motorPower<0) motorPower=0;
+
+    //analogWrite(5,motorPower);
+    myHTTPServer.send(200, "text/html", motorSpeed);
+  }
+  else
+    myHTTPServer.send(200, "text/plain", "Something Wrong!");
+}
+
+void acceleration(void){
+  
+    Wire.begin(4,5);//(SCL 5)
+    Wire.beginTransmission(MPU_Address);
+    Wire.write(0x6B);
+    Wire.write(0x01);
+    Wire.endTransmission(true);
+    
+  if(millis()- lastMs >= DELAY_MS)
+    {
+      lastMs = millis();
+      
+      Wire.beginTransmission(MPU_Address);
+      Wire.write(0x3B);
+      Wire.endTransmission();  
+      Wire.requestFrom(MPU_Address,14,true);  
+  
+      AcX=Wire.read() << 8 | Wire.read(); 
+      AcY=Wire.read() << 8 | Wire.read();
+      AcZ=Wire.read() << 8 | Wire.read();
+      Tmp=Wire.read() << 8 | Wire.read();
+      
+      //Serial.print(" Tmp = "); 
+      //Serial.print(Tmp/340.00+36.53);
+      Serial.print("\r\n");
+      
+      sprintf(acc_x, "%f",AcX);
+      sprintf(acc_y, "%f",AcY);
+      sprintf(acc_z, "%f",AcZ);
+    }  
+
+    /*if(myHTTPServer.hasArg("power"))
+    {
+    strcpy(motorSpeed, "<meta charset=utf-8>"); //한글 작성을 위한 부분
+    strcat(motorSpeed, "Moter Speed: ");
+    strcat(motorSpeed, myHTTPServer.arg("power").c_str());
+    motorPower = atoi(myHTTPServer.arg("power").c_str());
+
+    if(motorPower>=1023) motorPower=1023;
+    else if (motorPower<0) motorPower=0;
+
+    //analogWrite(5,motorPower);
+    myHTTPServer.send(200, "text/html", motorSpeed);
+    }
+    else
+    myHTTPServer.send(200, "text/plain", "Something Wrong!");
+    */
+
+    //myHTTPServer.hasArg();
+    //myHTTPServer.send();
+}
+void setup() {
+  
+  Serial.begin(115200);
+  
+  //pinMode(5, OUTPUT);
+//--------------------------------------Wifi connection--------------------------------------------------------------------------------  
+  WiFi.mode(WIFI_AP_STA);
+  Serial.printf("WiFimode:%d\r\n",WiFi.getMode());
+  WiFi.begin("STRADALE_2G","jhome7791!");
+  
+  while(1) //Wifi connection 
+  {
+    if(WiFi.waitForConnectResult()==WL_CONNECTED)
+    {
+      Serial.printf("IP: %s gateway:%s \r\n", WiFi.subnetMask().toString().c_str(), WiFi.gatewayIP().toString().c_str());
+      break; 
+    }
+    else
+      delay(100);
+  }
+
+  Serial.printf("Wifi Connected\r\n"); 
+  Serial.println(WiFi.localIP());
+//--------------------------------------Wifi connection--------------------------------------------------------------------------------
+
+  myHTTPServer.on("/",fnRoot); //call back 함수 등록
+  myHTTPServer.on("/input",motor ); //call back 함수 등록
+  myHTTPServer.on("/weather",openweatherAPI);
+  myHTTPServer.on("/acceleration",acceleration);
+  //myHTTPServer.on("");
+  myHTTPServer.begin(); //웹 서버 오픈
+  delay(5000);
+}
+
+
+void loop() {
+  myHTTPServer.handleClient(); //loop 안에 반드시 있어야 하는 친구,,가능한 delay 쓰지말고(millis 사용), 루프마다 handleClient 불러와주기. 
+}
